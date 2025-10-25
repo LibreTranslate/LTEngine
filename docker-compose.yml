@@ -1,0 +1,14 @@
+version: "3.8"
+services:
+  ltengine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: libretranslate/ltengine:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/models
+    environment:
+      - MODEL_PATH=/models
+    restart: unless-stopped
