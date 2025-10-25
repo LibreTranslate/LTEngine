@@ -4,11 +4,23 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: libretranslate/ltengine:latest
+      # Example to build with features at compose time:
+      # args:
+      #   FEATURES: "vulkan"
+      #   # For CUDA build, set BASE_IMAGE and RUNTIME_BASE to CUDA images:
+      #   # BASE_IMAGE: "nvidia/cuda:12.4.1-devel-ubuntu22.04"
+      #   # RUNTIME_BASE: "nvidia/cuda:12.4.1-runtime-ubuntu22.04"
+    image: denyncrawford/ltengine:local
     ports:
       - "8080:8080"
     volumes:
       - ./models:/models
     environment:
       - MODEL_PATH=/models
+    # Default command: specify model file or allow engine to download based on -m
+    command: ["--model-file", "/models/custom.gguf"]
     restart: unless-stopped
+
+# Notes:
+# - To use NVIDIA GPUs set 'deploy' or use docker run --gpus all ...
+# - For GPU access with compose on newer Docker, use device_requests (see README_DOCKER.md).
