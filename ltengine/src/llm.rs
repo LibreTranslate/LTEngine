@@ -76,16 +76,16 @@ impl LLM {
         //     eprint!("{} {} | ", self.model.token_to_str(*token, Special::Tokenize)?, token);
         // }
         let ctx_size: i32 = tokens_list.len() as i32 * 3;
+        // Lock before create_context: context allocation uses GPU resources and
+        // two concurrent allocations corrupt each other even before inference starts.
+        let _lock = self.prompt_lock.lock();
+        // TODO: The llama bindings (or llama itself?) do not appear to be totally thread-safe
+        // as garbage starts to come out when we run inference in parallel
+        // this might need to be investigated and fixed. For now we lock and process requests
+        // one at a time.
+        // TODO: consider locking with a timeout: https://docs.rs/parking_lot/latest/parking_lot/type.Mutex.html#method.try_lock_for
         let mut ctx = self.create_context(ctx_size)?;
-        {
-            // TODO: The llama bindings (or llama itself?) do not appear to be totally thread-safe
-            // as garbage starts to come out when we run inference in parallel
-            // this might need to be investigated and fixed. For now we lock and process requests
-            // one at a time.
-            // TODO: consider locking with a timeout: https://docs.rs/parking_lot/latest/parking_lot/type.Mutex.html#method.try_lock_for
-            let _lock = self.prompt_lock.lock();
-            ctx.process(tokens_list)
-        }
+        ctx.process(tokens_list)
     }
 }
 
