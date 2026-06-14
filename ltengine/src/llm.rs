@@ -13,10 +13,60 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use anyhow::{Result, Context};
 
+/// Query total VRAM (MiB) on device 0 using llama.cpp's backend API.
+/// Works for both CUDA and Vulkan builds; returns None for CPU builds.
+fn total_vram_mib() -> Option<u64> {
+    let mut free = 0usize;
+    let mut total = 0usize;
+
+    #[cfg(feature = "cuda")]
+    {
+        unsafe extern "C" {
+            fn ggml_backend_cuda_get_device_memory(device: i32, free: *mut usize, total: *mut usize);
+        }
+        unsafe { ggml_backend_cuda_get_device_memory(0, &mut free, &mut total) };
+        if total > 0 {
+            return Some(total as u64 / (1024 * 1024));
+        }
+    }
+
+    #[cfg(feature = "vulkan")]
+    {
+        unsafe extern "C" {
+            fn ggml_backend_vk_get_device_memory(device: i32, free: *mut usize, total: *mut usize);
+        }
+        unsafe { ggml_backend_vk_get_device_memory(0, &mut free, &mut total) };
+        if total > 0 {
+            return Some(total as u64 / (1024 * 1024));
+        }
+    }
+
+    let _ = (free, total);
+    None
+}
+
+/// Pick n_ubatch based on total VRAM of the primary GPU device.
+///
+/// On cards with limited VRAM the default n_ubatch can exhaust memory when
+/// combined with KV cache and GPU compute buffers, causing an OOM crash.
+/// We use n_ubatch=128 on cards with less than 6 GB of total VRAM.
+fn pick_n_ubatch(use_gpu: bool) -> u32 {
+    let default = LlamaContextParams::default().n_ubatch();
+    if use_gpu {
+        if let Some(total_mib) = total_vram_mib() {
+            let n = if total_mib >= 6 * 1024 { default } else { 128 };
+            eprintln!("ltengine: {} MiB total VRAM, n_ubatch={}", total_mib, n);
+            return n;
+        }
+    }
+    default
+}
+
 pub struct LLM {
     backend: LlamaBackend,
     model: LlamaModel,
-    prompt_lock: Mutex<bool>
+    prompt_lock: Mutex<bool>,
+    n_ubatch: u32,
 }
 
 pub struct LLMContext<'a>{
@@ -43,13 +93,18 @@ impl LLM {
 
         let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
             .with_context(|| "Unable to load model")?;
-        
-        Ok(LLM { backend, model, prompt_lock: Mutex::new(true) })
+
+        let use_gpu = !cpu && cfg!(any(feature = "cuda", feature = "vulkan"));
+        let n_ubatch = pick_n_ubatch(use_gpu);
+
+        Ok(LLM { backend, model, prompt_lock: Mutex::new(true), n_ubatch })
     }
 
     pub fn create_context(&self, ctx_size: i32) -> Result<LLMContext>{
         let ctx_params =
-            LlamaContextParams::default().with_n_ctx(Some(NonZeroU32::new(ctx_size as u32).unwrap()));
+            LlamaContextParams::default()
+                .with_n_ctx(Some(NonZeroU32::new(ctx_size as u32).unwrap()))
+                .with_n_ubatch(self.n_ubatch);
 
         // Use all threads
         // ctx_params = ctx_params.with_n_threads(threads);
