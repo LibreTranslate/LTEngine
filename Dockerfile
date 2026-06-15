@@ -31,7 +31,7 @@ COPY . .
 
 # Build with CUDA support (cargo caches survive layer cache hits)
 RUN --mount=type=cache,id=ltengine-cargo-git,target=/usr/local/cargo/git \
-    --mount=type=cache,id=ltengine-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=ltengine-cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=ltengine-target,target=/build/target \
     cargo build --features cuda --release -p ltengine && \
     cp target/release/ltengine /ltengine
