@@ -1,0 +1,9 @@
+.git
+.github
+.vscode
+llama-cpp-rs
+target
+*.md
+docker-compose.yml
+.gitignore
+.gitmodules
