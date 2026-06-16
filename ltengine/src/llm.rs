@@ -104,6 +104,12 @@ impl LLM {
         let use_gpu = !cpu && cfg!(any(feature = "cuda", feature = "vulkan"));
         let n_ubatch = pick_n_ubatch(use_gpu);
 
+        if use_gpu {
+            eprintln!("ltengine: {} model layers, all offloaded to GPU", model.n_layer());
+        } else {
+            eprintln!("ltengine: {} model layers, CPU only", model.n_layer());
+        }
+
         Ok(LLM { backend, model, prompt_lock: Mutex::new(()), n_ubatch })
     }
 
