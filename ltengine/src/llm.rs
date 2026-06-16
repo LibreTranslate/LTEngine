@@ -22,6 +22,7 @@ pub enum LLMError {
 
 /// Query total VRAM (MiB) on device 0 using llama.cpp's backend API.
 /// Works for both CUDA and Vulkan builds; returns None for CPU builds.
+#[allow(unused_mut)]
 fn total_vram_mib() -> Option<u64> {
     let mut free = 0usize;
     let mut total = 0usize;
@@ -113,7 +114,7 @@ impl LLM {
         Ok(LLM { backend, model, prompt_lock: Mutex::new(()), n_ubatch })
     }
 
-    pub fn create_context(&self, ctx_size: i32) -> Result<LLMContext>{
+    pub fn create_context(&self, ctx_size: i32) -> Result<LLMContext<'_>>{
         let ctx_params =
             LlamaContextParams::default()
                 .with_n_ctx(Some(NonZeroU32::new(ctx_size as u32).unwrap()))
