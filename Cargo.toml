@@ -11,7 +11,7 @@ thiserror = "1"
 tracing = "0.1"
 tracing-core = "0.1"
 bindgen = "0.69.5"
-cc = "1.2.26"
+cc = "1.2.64"
 encoding_rs = "0.8.35"
 
 [workspace.lints.rust]
