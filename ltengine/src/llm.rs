@@ -10,8 +10,15 @@ use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::{send_logs_to_tracing, LogOptions};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use parking_lot::Mutex;
+use std::time::Duration;
 use anyhow::{Result, Context};
+
+#[derive(Debug, thiserror::Error)]
+pub enum LLMError {
+    #[error("Server busy, please try again later")]
+    Busy,
+}
 
 /// Query total VRAM (MiB) on device 0 using llama.cpp's backend API.
 /// Works for both CUDA and Vulkan builds; returns None for CPU builds.
@@ -65,7 +72,7 @@ fn pick_n_ubatch(use_gpu: bool) -> u32 {
 pub struct LLM {
     backend: LlamaBackend,
     model: LlamaModel,
-    prompt_lock: Mutex<bool>,
+    prompt_lock: Mutex<()>,
     n_ubatch: u32,
 }
 
@@ -97,7 +104,7 @@ impl LLM {
         let use_gpu = !cpu && cfg!(any(feature = "cuda", feature = "vulkan"));
         let n_ubatch = pick_n_ubatch(use_gpu);
 
-        Ok(LLM { backend, model, prompt_lock: Mutex::new(true), n_ubatch })
+        Ok(LLM { backend, model, prompt_lock: Mutex::new(()), n_ubatch })
     }
 
     pub fn create_context(&self, ctx_size: i32) -> Result<LLMContext>{
@@ -133,12 +140,12 @@ impl LLM {
         let ctx_size: i32 = tokens_list.len() as i32 * 3;
         // Lock before create_context: context allocation uses GPU resources and
         // two concurrent allocations corrupt each other even before inference starts.
-        let _lock = self.prompt_lock.lock();
         // TODO: The llama bindings (or llama itself?) do not appear to be totally thread-safe
         // as garbage starts to come out when we run inference in parallel
         // this might need to be investigated and fixed. For now we lock and process requests
         // one at a time.
-        // TODO: consider locking with a timeout: https://docs.rs/parking_lot/latest/parking_lot/type.Mutex.html#method.try_lock_for
+        let _lock = self.prompt_lock.try_lock_for(Duration::from_secs(120))
+            .ok_or(LLMError::Busy)?;
         let mut ctx = self.create_context(ctx_size)?;
         ctx.process(tokens_list)
     }

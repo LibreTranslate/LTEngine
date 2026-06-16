@@ -13,6 +13,8 @@ actix-web-static-files = "4.0"
 static-files = "0.2.1"
 hf-hub = { version = "0.3.2" }
 anyhow = "1.0.97"
+thiserror = { workspace = true }
+parking_lot = "0.12.5"
 llama-cpp-2 = { path = "../llama-cpp-rs/llama-cpp-2", version = "0.1.109" }
 encoding_rs = "0.8.35"
 actix-multipart = "0.7.2"

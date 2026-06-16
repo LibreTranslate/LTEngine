@@ -1382,9 +1382,11 @@ dependencies = [
  "hf-hub",
  "llama-cpp-2",
  "once_cell",
+ "parking_lot",
  "serde",
  "serde_json",
  "static-files",
+ "thiserror",
  "whatlang",
 ]
 

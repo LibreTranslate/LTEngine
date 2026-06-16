@@ -254,8 +254,11 @@ async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<
     let prompt = pb.build(&q);
     
     let translated_text = if source != target {
-        llm.run_prompt(prompt.system, prompt.user).unwrap_or(q.clone())
-    }else{
+        llm.run_prompt(prompt.system, prompt.user).map_err(|e| {
+            let status = if e.is::<llm::LLMError>() { 503 } else { 500 };
+            ErrorResponse { error: e.to_string(), status }
+        })?
+    } else {
         q.clone()
     };
     
