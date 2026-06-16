@@ -15,7 +15,7 @@ hf-hub = { version = "0.3.2" }
 anyhow = "1.0.102"
 thiserror = { workspace = true }
 parking_lot = "0.12.5"
-llama-cpp-2 = { path = "../llama-cpp-rs/llama-cpp-2", version = "0.1.109" }
+llama-cpp-2 = { version = "0.1.149" }
 encoding_rs = "0.8.35"
 actix-multipart = "0.7.2"
 whatlang = "0.16.4"
@@ -23,7 +23,6 @@ whatlang = "0.16.4"
 [features]
 cuda = ["llama-cpp-2/cuda"]
 metal = ["llama-cpp-2/metal"]
-native = ["llama-cpp-2/native"]
 vulkan = ["llama-cpp-2/vulkan"]
 
 [build-dependencies]
