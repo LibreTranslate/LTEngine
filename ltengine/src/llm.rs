@@ -1,10 +1,9 @@
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{LlamaModel, LlamaChatMessage};
+use llama_cpp_2::model::{AddBos, LlamaModel, LlamaChatMessage};
 use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::context::LlamaContext;
-use llama_cpp_2::model::AddBos;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::{send_logs_to_tracing, LogOptions};
@@ -168,16 +167,26 @@ impl LLM {
     }
 
     pub fn run_prompt(&self, system: String, user: String) -> Result<String>{
-        let tmpl = self.model.chat_template(None)?;
-        let llm_input = self.model.apply_chat_template(&tmpl, &[
-            LlamaChatMessage::new("system".to_string(), system)?,
-            LlamaChatMessage::new("user".to_string(), user)?
-        ], true)?;
+        let messages = [
+            LlamaChatMessage::new("user".to_string(), format!("{system}\n\n{user}"))
+                .context("Failed to build chat message")?
+        ];
 
+        // Use the model's embedded chat template when llama.cpp can detect it.
+        // Falls back to hardcoded Gemma format when detection fails (e.g. Gemma 4
+        // until llama-cpp-sys picks up the upstream Gemma 4 template detection fix).
+        let llm_input = self.model
+            .chat_template(None)
+            .ok()
+            .and_then(|tmpl| self.model.apply_chat_template(&tmpl, &messages, true).ok())
+            .unwrap_or_else(|| format!(
+                "<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n<start_of_turn>model\n"
+            ));
+
+        // BOS is not added by apply_chat_template — str_to_token handles it.
         let tokens_list = self.model
-            .str_to_token(&llm_input
-            , AddBos::Always)
-            .with_context(|| format!("Failed to tokenize {llm_input}"))?;
+            .str_to_token(&llm_input, AddBos::Always)
+            .with_context(|| "Failed to tokenize prompt")?;
         // for token in &tokens_list {
         //     eprint!("{} {} | ", self.model.token_to_str(*token, Special::Tokenize)?, token);
         // }
@@ -256,6 +265,14 @@ impl LLMContext<'_>{
             self.ctx.decode(&mut batch).with_context(|| "Failed to eval")?;
         }
 
+        // Gemma may emit <end_of_turn> as literal text when it cannot translate
+        // (e.g. unsupported language/format combination) instead of the special
+        // EOG token caught above. Strip it and treat empty output as an error.
+        let output = output.replace("<end_of_turn>", "");
+        let output = output.trim().to_owned();
+        if output.is_empty() {
+            return Err(anyhow::anyhow!("Model produced empty output"));
+        }
         Ok(output)
     }
 }

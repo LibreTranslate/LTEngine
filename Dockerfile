@@ -5,8 +5,9 @@ FROM nvidia/cuda:13.3.0-devel-ubuntu24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl build-essential clang cmake pkg-config libssl-dev libnccl-dev \
-    && rm -rf /var/lib/apt/lists/*
+    curl build-essential clang cmake pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /usr/local/cuda/include/nccl*.h
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -17,12 +18,9 @@ WORKDIR /build
 COPY . .
 
 # Build with CUDA support (cargo caches survive layer cache hits)
-# RUSTFLAGS: llama-cpp-sys-2 build script does not emit -lnccl despite newer
-# llama.cpp referencing NCCL symbols in its CUDA backend.
 RUN --mount=type=cache,id=ltengine-cargo-git,target=/usr/local/cargo/git \
     --mount=type=cache,id=ltengine-cargo-registry,target=/root/.cargo/registry \
-    --mount=type=cache,id=ltengine-target-cuda13,target=/build/target \
-    RUSTFLAGS="-l nccl" \
+    --mount=type=cache,id=ltengine-target-cuda13-nonccl,target=/build/target \
     cargo build --features cuda --release -p ltengine && \
     cp target/release/ltengine /ltengine
 
@@ -30,7 +28,7 @@ RUN --mount=type=cache,id=ltengine-cargo-git,target=/usr/local/cargo/git \
 FROM nvidia/cuda:13.3.0-runtime-ubuntu24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libssl3 libgomp1 libnccl2 \
+    ca-certificates libssl3 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --no-create-home ltengine \

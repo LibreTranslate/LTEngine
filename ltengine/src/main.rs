@@ -256,7 +256,9 @@ async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<
     let translated_text = if source != target {
         llm.run_prompt(prompt.system, prompt.user).map_err(|e| {
             let status = if e.is::<llm::LLMError>() { 503 } else { 500 };
-            ErrorResponse { error: e.to_string(), status }
+            let msg = format!("{:#}", e);
+            eprintln!("translation error: {}", msg);
+            ErrorResponse { error: msg, status }
         })?
     } else {
         q.clone()
