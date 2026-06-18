@@ -175,13 +175,17 @@ impl LLM {
         // Use the model's embedded chat template when llama.cpp can detect it.
         // Falls back to hardcoded Gemma format when detection fails (e.g. Gemma 4
         // until llama-cpp-sys picks up the upstream Gemma 4 template detection fix).
-        let llm_input = self.model
+        let llm_input = match self.model
             .chat_template(None)
             .ok()
             .and_then(|tmpl| self.model.apply_chat_template(&tmpl, &messages, true).ok())
-            .unwrap_or_else(|| format!(
-                "<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n<start_of_turn>model\n"
-            ));
+        {
+            Some(s) => s,
+            None => {
+                eprintln!("ltengine: apply_chat_template failed: using hardcoded Gemma format");
+                format!("<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n<start_of_turn>model\n")
+            }
+        };
 
         // BOS is not added by apply_chat_template — str_to_token handles it.
         let tokens_list = self.model
