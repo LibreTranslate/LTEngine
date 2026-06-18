@@ -188,13 +188,17 @@ impl LLM {
         // Use the model's embedded chat template when llama.cpp can detect it.
         // Falls back to hardcoded Gemma format when detection fails (e.g. Gemma 4
         // until llama-cpp-sys picks up the upstream Gemma 4 template detection fix).
-        let llm_input = self.model
+        let llm_input = match self.model
             .chat_template(None)
             .ok()
             .and_then(|tmpl| self.model.apply_chat_template(&tmpl, &messages, true).ok())
-            .unwrap_or_else(|| format!(
-                "<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n<start_of_turn>model\n"
-            ));
+        {
+            Some(s) => s,
+            None => {
+                eprintln!("ltengine: apply_chat_template failed: using hardcoded Gemma format");
+                format!("<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n<start_of_turn>model\n")
+            }
+        };
 
         // BOS is not added by apply_chat_template — str_to_token handles it.
         let tokens_list = self.model
@@ -278,6 +282,17 @@ impl LLMContext<'_>{
             self.ctx.decode(&mut batch).with_context(|| "Failed to eval")?;
         }
 
+        // Gemma 4 thinking mode emits thinking content before the actual response in two forms:
+        // 1. <|channel>thought\n...<channel|>answer  (full block with closing tag)
+        // 2. <|channel>thought answer                (no closing tag, space-separated)
+        let output = if let Some(pos) = output.find("<channel|>") {
+            output[pos + "<channel|>".len()..].to_owned()
+        } else if let Some(rest) = output.strip_prefix("<|channel>thought") {
+            rest.trim_start_matches(['\n', ' ']).to_owned()
+        } else {
+            output
+        };
+
         // Gemma may emit <end_of_turn> as literal text when it cannot translate
         // (e.g. unsupported language/format combination) instead of the special
         // EOG token caught above. Strip it and treat empty output as an error.
@@ -286,6 +301,7 @@ impl LLMContext<'_>{
         if output.is_empty() {
             return Err(anyhow::anyhow!("Model produced empty output"));
         }
+
         Ok(output)
     }
 }
