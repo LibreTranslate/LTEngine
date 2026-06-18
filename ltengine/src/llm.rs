@@ -93,10 +93,23 @@ impl LLM {
         let (model, gpu_layers) = if use_gpu {
             let mut n_gpu = 9999u32;
             let model = loop {
-                let model = LlamaModel::load_from_file(
+                let model = match LlamaModel::load_from_file(
                     &backend, &model_path,
                     &LlamaModelParams::default().with_n_gpu_layers(n_gpu),
-                ).with_context(|| "Unable to load model")?;
+                ) {
+                    Ok(m) => m,
+                    Err(_) => {
+                        // Load failed (likely GPU OOM before probe). On the first failure
+                        // jump to 64 (covers most models); after that halve to converge fast.
+                        let next = if n_gpu >= 9999 { 64 } else { n_gpu / 2 };
+                        eprintln!("ltengine: model load failed at {} GPU layers, retrying with {}", n_gpu, next);
+                        n_gpu = next;
+                        if n_gpu == 0 {
+                            return Err(anyhow::anyhow!("Unable to load model even with 0 GPU layers"));
+                        }
+                        continue;
+                    }
+                };
 
                 // Probe: create a minimal context and decode one token to confirm
                 // the GPU has enough VRAM for compute scratch buffers.
