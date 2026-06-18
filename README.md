@@ -145,7 +145,7 @@ You can use the LTEngine API using the following bindings:
  - [ ] Create comparative benchmarks between LTEngine and proprietary software.
  - [ ] Add support for command line inference (run `./ltengine translate` as a command line app separate from `./ltengine server`)
  - [ ] Make ltengine available as a library, possibly creating bindings for other languages like Python.
- - [ ] Automated builds / CI
+ - [x] Automated builds / CI
  - [ ] Your ideas? We welcome contributions.
 
 ## Contributing
