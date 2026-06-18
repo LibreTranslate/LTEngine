@@ -4,7 +4,6 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel, LlamaChatMessage};
 use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::context::LlamaContext;
-use llama_cpp_2::model::AddBos;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::{send_logs_to_tracing, LogOptions};
