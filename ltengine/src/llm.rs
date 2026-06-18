@@ -265,6 +265,17 @@ impl LLMContext<'_>{
             self.ctx.decode(&mut batch).with_context(|| "Failed to eval")?;
         }
 
+        // Gemma 4 thinking mode emits thinking content before the actual response in two forms:
+        // 1. <|channel>thought\n...<channel|>answer  (full block with closing tag)
+        // 2. <|channel>thought answer                (no closing tag, space-separated)
+        let output = if let Some(pos) = output.find("<channel|>") {
+            output[pos + "<channel|>".len()..].to_owned()
+        } else if let Some(rest) = output.strip_prefix("<|channel>thought") {
+            rest.trim_start_matches(['\n', ' ']).to_owned()
+        } else {
+            output
+        };
+
         // Gemma may emit <end_of_turn> as literal text when it cannot translate
         // (e.g. unsupported language/format combination) instead of the special
         // EOG token caught above. Strip it and treat empty output as an error.
@@ -273,6 +284,7 @@ impl LLMContext<'_>{
         if output.is_empty() {
             return Err(anyhow::anyhow!("Model produced empty output"));
         }
+
         Ok(output)
     }
 }
