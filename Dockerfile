@@ -43,4 +43,4 @@ VOLUME ["/models"]
 EXPOSE 5050
 
 USER ltengine
-CMD ["sh", "-c", "exec ltengine --host 0.0.0.0 -m \"${LTENGINE_MODEL}\""]
+CMD ["sh", "-c", "exec ltengine --host 0.0.0.0 -m \"${LTENGINE_MODEL}\" ${LTENGINE_MODEL_FILE:+--model-file \"${LTENGINE_MODEL_FILE}\"}"]

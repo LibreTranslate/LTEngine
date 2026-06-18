@@ -25,6 +25,7 @@ pub static MODELS: once_cell::sync::Lazy<HashMap<&'static str, HuggingFace>> = o
     m.insert("gemma3-4b", HuggingFace { repo: "libretranslate/gemma3", model: "gemma-3-4b-it-q4_0.gguf" });
     m.insert("gemma3-12b", HuggingFace { repo: "libretranslate/gemma3", model: "gemma-3-12b-it-q4_0.gguf" });
     m.insert("gemma3-27b", HuggingFace { repo: "libretranslate/gemma3", model: "gemma-3-27b-it-q4_0.gguf" });
+    m.insert("gemma4-e4b", HuggingFace { repo: "bartowski/google_gemma-4-E4B-it-GGUF", model: "google_gemma-4-E4B-it-Q4_0.gguf" });
     m
 });
 
