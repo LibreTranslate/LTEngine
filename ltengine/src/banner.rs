@@ -1,5 +1,6 @@
-pub fn print_banner(){
-    println!(r#"
+pub fn print_banner() {
+    println!(
+        r#"
  __________________________________________
     __  ____________            _          
    / / /_  __/ ____/___  ____ _(_)___  ___ 
@@ -10,5 +11,6 @@ pub fn print_banner(){
 
         Local AI Machine Translation
 ___________________________________________
-"#);
+"#
+    );
 }

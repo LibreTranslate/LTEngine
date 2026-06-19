@@ -1,24 +1,24 @@
-use actix_web::{
-    get, post, web, App, HttpRequest, HttpResponse, 
-    HttpServer, Responder, http::header, FromRequest
-};
 use actix_multipart::form::{MultipartForm, text::Text as MPText};
+use actix_web::{
+    App, FromRequest, HttpRequest, HttpResponse, HttpServer, Responder, get, http::header, post,
+    web,
+};
 use actix_web_static_files::ResourceFiles;
-use std::sync::Arc;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
+mod banner;
 mod error_response;
 mod languages;
-mod models;
 mod llm;
-mod banner;
+mod models;
 mod prompt;
 
-use languages::{detect_lang, get_language_from_code, LANGUAGES};
-use error_response::ErrorResponse;
-use models::{MODELS, load_model};
 use banner::print_banner;
+use error_response::ErrorResponse;
+use languages::{LANGUAGES, detect_lang, get_language_from_code};
+use models::{MODELS, load_model};
 use prompt::PromptBuilder;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
@@ -48,7 +48,7 @@ struct Args {
 
     /// Set an API key
     #[arg(long, default_value = "")]
-    api_key: String,  
+    api_key: String,
 
     /// Use CPU only
     #[arg(long)]
@@ -56,7 +56,7 @@ struct Args {
 
     /// Enable verbose logging
     #[arg(short = 'v', long)]
-    verbose: bool
+    verbose: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -66,7 +66,7 @@ struct TranslateRequest {
     target: Option<String>,
     format: Option<String>,
     api_key: Option<String>,
-    alternatives: Option<u32>
+    alternatives: Option<u32>,
 }
 
 #[derive(MultipartForm)]
@@ -76,7 +76,7 @@ struct MPTranslateRequest {
     target: Option<MPText<String>>,
     format: Option<MPText<String>>,
     api_key: Option<MPText<String>>,
-    alternatives: Option<MPText<u32>>
+    alternatives: Option<MPText<u32>>,
 }
 impl MPTranslateRequest {
     fn into_translate_request(self) -> TranslateRequest {
@@ -91,27 +91,47 @@ impl MPTranslateRequest {
     }
 }
 
-async fn parse_payload(req: HttpRequest, payload: web::Payload) -> Result<TranslateRequest, ErrorResponse>{
-    let content_type = req.headers().get(header::CONTENT_TYPE).map(|h| h.to_str().unwrap_or("")).unwrap_or("");
+async fn parse_payload(
+    req: HttpRequest,
+    payload: web::Payload,
+) -> Result<TranslateRequest, ErrorResponse> {
+    let content_type = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .map(|h| h.to_str().unwrap_or(""))
+        .unwrap_or("");
     let body: TranslateRequest;
 
     if content_type.starts_with("application/json") {
-        let json = actix_web::web::Json::<TranslateRequest>::from_request(&req, &mut payload.into_inner()).await?;
+        let json =
+            actix_web::web::Json::<TranslateRequest>::from_request(&req, &mut payload.into_inner())
+                .await?;
         body = json.into_inner()
     } else if content_type.starts_with("application/x-www-form-urlencoded") {
-        let form = actix_web::web::Form::<TranslateRequest>::from_request(&req, &mut payload.into_inner()).await?;
+        let form =
+            actix_web::web::Form::<TranslateRequest>::from_request(&req, &mut payload.into_inner())
+                .await?;
         body = form.into_inner()
     } else if content_type.starts_with("multipart/form-data") {
-        let form = MultipartForm::<MPTranslateRequest>::from_request(&req, &mut payload.into_inner()).await?;
+        let form =
+            MultipartForm::<MPTranslateRequest>::from_request(&req, &mut payload.into_inner())
+                .await?;
         body = form.into_inner().into_translate_request();
     } else {
-        return Err(ErrorResponse{ error: "Unsupported content-type".to_string(), status: 400 });
+        return Err(ErrorResponse {
+            error: "Unsupported content-type".to_string(),
+            status: 400,
+        });
     }
 
     return Ok(body);
 }
 
-fn check_params(body: &TranslateRequest, args: &Args, required_params: &[(&str, &Option<String>)]) -> Result<bool, ErrorResponse> {
+fn check_params(
+    body: &TranslateRequest,
+    args: &Args,
+    required_params: &[(&str, &Option<String>)],
+) -> Result<bool, ErrorResponse> {
     // Validate required params
     for (key, value) in required_params {
         if value.as_ref().is_none_or(|v| v.trim().is_empty()) {
@@ -121,7 +141,7 @@ fn check_params(body: &TranslateRequest, args: &Args, required_params: &[(&str, 
             });
         }
     }
-    
+
     // Check key
     if !args.api_key.is_empty() && body.api_key.as_ref().is_none_or(|key| *key != args.api_key) {
         return Err(ErrorResponse {
@@ -133,7 +153,11 @@ fn check_params(body: &TranslateRequest, args: &Args, required_params: &[(&str, 
     let q = body.q.as_ref().unwrap();
     if q.len() > args.char_limit {
         return Err(ErrorResponse {
-            error: format!("Invalid request: request ({}) exceeds text limit ({})", q.len(), args.char_limit),
+            error: format!(
+                "Invalid request: request ({}) exceeds text limit ({})",
+                q.len(),
+                args.char_limit
+            ),
             status: 400,
         });
     }
@@ -157,16 +181,16 @@ fn improve_formatting(q: &String, translation: &String) -> String {
     let mut result = t.clone();
 
     const PUNCTUATION_CHARS: [char; 6] = ['!', '?', '.', ',', ';', '。'];
-    if PUNCTUATION_CHARS.contains(&q_last_char){
-        if q_last_char != translation_last_char{
-            if PUNCTUATION_CHARS.contains(&translation_last_char){
+    if PUNCTUATION_CHARS.contains(&q_last_char) {
+        if q_last_char != translation_last_char {
+            if PUNCTUATION_CHARS.contains(&translation_last_char) {
                 result.pop();
             }
 
             result.push(q_last_char);
         }
-    }else if PUNCTUATION_CHARS.contains(&translation_last_char) {
-        result.pop();   
+    } else if PUNCTUATION_CHARS.contains(&translation_last_char) {
+        result.pop();
     }
 
     if q.chars().all(|c| c.is_lowercase()) {
@@ -180,7 +204,7 @@ fn improve_formatting(q: &String, translation: &String) -> String {
     if let (Some(q0), Some(r0)) = (q.chars().next(), result.chars().next()) {
         if q0.is_lowercase() && r0.is_uppercase() {
             result.replace_range(0..r0.len_utf8(), &r0.to_lowercase().to_string());
-        }else if q0.is_uppercase() && r0.is_lowercase() {
+        } else if q0.is_uppercase() && r0.is_lowercase() {
             result.replace_range(0..r0.len_utf8(), &r0.to_uppercase().to_string());
         }
     }
@@ -189,11 +213,13 @@ fn improve_formatting(q: &String, translation: &String) -> String {
 }
 
 #[post("/detect")]
-async fn detect(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<Args>>) -> Result<HttpResponse, ErrorResponse> {
+async fn detect(
+    req: HttpRequest,
+    payload: web::Payload,
+    args: web::Data<Arc<Args>>,
+) -> Result<HttpResponse, ErrorResponse> {
     let body = parse_payload(req, payload).await?;
-    check_params(&body, &args, &[
-        ("q", &body.q)
-    ])?;
+    check_params(&body, &args, &[("q", &body.q)])?;
 
     let q = body.q.unwrap();
     let d = detect_lang(&q);
@@ -210,33 +236,42 @@ fn check_format(format: &str) -> Result<bool, ErrorResponse> {
         _ => Err(ErrorResponse {
             error: "Invalid format. Supported formats: text, html".to_string(),
             status: 400,
-        })
+        }),
     }
 }
 
 #[post("/translate")]
-async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<Args>>, llm: actix_web::web::Data<Arc<llm::LLM>>) -> Result<HttpResponse, ErrorResponse> {
+async fn translate(
+    req: HttpRequest,
+    payload: web::Payload,
+    args: web::Data<Arc<Args>>,
+    llm: actix_web::web::Data<Arc<llm::LLM>>,
+) -> Result<HttpResponse, ErrorResponse> {
     let body = parse_payload(req, payload).await?;
-    check_params(&body, &args, &[
-        ("q", &body.q),
-        ("source", &body.source),
-        ("target", &body.target),
-    ])?;
+    check_params(
+        &body,
+        &args,
+        &[
+            ("q", &body.q),
+            ("source", &body.source),
+            ("target", &body.target),
+        ],
+    )?;
 
     let q = body.q.unwrap();
     let source = body.source.unwrap();
     let target = body.target.unwrap();
     let format = body.format.unwrap_or("text".to_string());
     check_format(&format)?;
-    
+
     let mut pb = PromptBuilder::new();
     pb.set_format(&format);
 
     // TODO: add HTML support
-    
-    if source == "auto"{
+
+    if source == "auto" {
         pb.set_source_language("auto");
-    }else{
+    } else {
         let src_lang = get_language_from_code(&source).ok_or_else(|| ErrorResponse {
             error: format!("{} is not supported", source),
             status: 400,
@@ -252,7 +287,7 @@ async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<
 
     let llm = llm.get_ref();
     let prompt = pb.build(&q);
-    
+
     let translated_text = if source != target {
         llm.run_prompt(prompt.system, prompt.user).map_err(|e| {
             let status = if e.is::<llm::LLMError>() { 503 } else { 500 };
@@ -263,8 +298,9 @@ async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<
     } else {
         q.clone()
     };
-    
-    let mut response = serde_json::json!({"translatedText": improve_formatting(&q, &translated_text)});
+
+    let mut response =
+        serde_json::json!({"translatedText": improve_formatting(&q, &translated_text)});
 
     // TODO: we just add this for compatibility for now
     // we should allow multiple alternatives to be generated
@@ -285,17 +321,17 @@ async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<
 
 #[post("/translate_file")]
 async fn translate_file() -> Result<HttpResponse, ErrorResponse> {
-    Err(ErrorResponse{
+    Err(ErrorResponse {
         error: "Not implemented".to_string(),
-        status: 501
+        status: 501,
     })
 }
 
 #[post("/suggest")]
 async fn suggest() -> Result<HttpResponse, ErrorResponse> {
-    Err(ErrorResponse{
+    Err(ErrorResponse {
         error: "Not implemented".to_string(),
-        status: 501
+        status: 501,
     })
 }
 
@@ -338,13 +374,15 @@ async fn main() -> std::io::Result<()> {
         eprintln!("Failed to load model: {}", err);
         std::process::exit(1);
     });
-    
+
     println!("Loading model: {}", model_path.display());
 
-    let llm = Arc::new(llm::LLM::new(model_path, args.cpu, args.verbose).unwrap_or_else(|err| {
-        eprintln!("Failed to initialize LLM: {}", err);
-        std::process::exit(1);
-    }));
+    let llm = Arc::new(
+        llm::LLM::new(model_path, args.cpu, args.verbose).unwrap_or_else(|err| {
+            eprintln!("Failed to initialize LLM: {}", err);
+            std::process::exit(1);
+        }),
+    );
 
     print_banner();
 

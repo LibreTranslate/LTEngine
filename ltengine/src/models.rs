@@ -1,7 +1,7 @@
+use anyhow::{Context, Result, anyhow};
+use hf_hub::api::sync::ApiBuilder;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use hf_hub::api::sync::ApiBuilder;
-use anyhow::{anyhow, Context, Result};
 
 #[derive(Clone, Debug)]
 pub struct HuggingFace {
@@ -11,24 +11,50 @@ pub struct HuggingFace {
 
 #[derive(Debug)]
 pub enum Model {
-    Local {
-        path: PathBuf,
-    },
-    Remote {
-        hf: HuggingFace,
-    },
+    Local { path: PathBuf },
+    Remote { hf: HuggingFace },
 }
 
-pub static MODELS: once_cell::sync::Lazy<HashMap<&'static str, HuggingFace>> = once_cell::sync::Lazy::new(|| {
-    let mut m = HashMap::new();
-    m.insert("gemma3-1b", HuggingFace { repo: "libretranslate/gemma3", model: "gemma-3-1b-it-q4_0.gguf" });
-    m.insert("gemma3-4b", HuggingFace { repo: "libretranslate/gemma3", model: "gemma-3-4b-it-q4_0.gguf" });
-    m.insert("gemma3-12b", HuggingFace { repo: "libretranslate/gemma3", model: "gemma-3-12b-it-q4_0.gguf" });
-    m.insert("gemma3-27b", HuggingFace { repo: "libretranslate/gemma3", model: "gemma-3-27b-it-q4_0.gguf" });
-    m.insert("gemma4-e4b", HuggingFace { repo: "bartowski/google_gemma-4-E4B-it-GGUF", model: "google_gemma-4-E4B-it-Q4_0.gguf" });
-    m
-});
-
+pub static MODELS: once_cell::sync::Lazy<HashMap<&'static str, HuggingFace>> =
+    once_cell::sync::Lazy::new(|| {
+        let mut m = HashMap::new();
+        m.insert(
+            "gemma3-1b",
+            HuggingFace {
+                repo: "libretranslate/gemma3",
+                model: "gemma-3-1b-it-q4_0.gguf",
+            },
+        );
+        m.insert(
+            "gemma3-4b",
+            HuggingFace {
+                repo: "libretranslate/gemma3",
+                model: "gemma-3-4b-it-q4_0.gguf",
+            },
+        );
+        m.insert(
+            "gemma3-12b",
+            HuggingFace {
+                repo: "libretranslate/gemma3",
+                model: "gemma-3-12b-it-q4_0.gguf",
+            },
+        );
+        m.insert(
+            "gemma3-27b",
+            HuggingFace {
+                repo: "libretranslate/gemma3",
+                model: "gemma-3-27b-it-q4_0.gguf",
+            },
+        );
+        m.insert(
+            "gemma4-e4b",
+            HuggingFace {
+                repo: "bartowski/google_gemma-4-E4B-it-GGUF",
+                model: "google_gemma-4-E4B-it-Q4_0.gguf",
+            },
+        );
+        m
+    });
 
 impl Model {
     fn load(&self) -> Result<PathBuf> {
@@ -37,9 +63,12 @@ impl Model {
                 if path.exists() && path.extension().and_then(|ext| ext.to_str()) == Some("gguf") {
                     Ok(path.clone())
                 } else {
-                    Err(anyhow!(format!("Invalid path or not a .gguf file: {}", path.display())))
+                    Err(anyhow!(format!(
+                        "Invalid path or not a .gguf file: {}",
+                        path.display()
+                    )))
                 }
-            },
+            }
             Model::Remote { hf } => ApiBuilder::new()
                 .with_progress(true)
                 .build()

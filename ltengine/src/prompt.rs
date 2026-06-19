@@ -1,12 +1,12 @@
-pub struct PromptBuilder{
+pub struct PromptBuilder {
     source_language: &'static str,
     target_language: &'static str,
     format: String,
 }
 
-pub struct Prompt{
+pub struct Prompt {
     pub system: String,
-    pub user: String
+    pub user: String,
 }
 
 impl PromptBuilder {
@@ -22,7 +22,6 @@ impl PromptBuilder {
         self.format = format.to_string();
         self
     }
-
 
     pub fn set_source_language(&mut self, s: &'static str) -> &mut PromptBuilder {
         self.source_language = s;
@@ -41,19 +40,22 @@ impl PromptBuilder {
             "You are an expert linguist, specializing in translation. You are able to capture the nuances of the languages you translate. You pay attention to masculine/feminine/plural and proper use of articles and grammar. You always provide natural sounding translations that fully preserve the meaning of the original text. You never provide explanations for your work. You always answer with the translated text and nothing else."
         }.to_string();
 
-
-        let user = (if self.source_language == "auto"{
+        let user = (if self.source_language == "auto" {
             format!(
                 "Translate the text below to {}.\n\nText: {}\n\n{}:\n",
                 self.target_language, q, self.target_language
             )
-        }else{
+        } else {
             format!(
                 "Translate the text below from {} to {}.\n\n{}: {}\n\n{}:\n",
-                self.source_language, self.target_language,
-                self.source_language, q, self.target_language
+                self.source_language,
+                self.target_language,
+                self.source_language,
+                q,
+                self.target_language
             )
-        }).to_string();
+        })
+        .to_string();
 
         Prompt { system, user }
     }

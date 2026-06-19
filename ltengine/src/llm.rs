@@ -1,17 +1,17 @@
+use anyhow::{Context, Result};
+use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
-use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel, LlamaChatMessage};
-use llama_cpp_2::token::LlamaToken;
-use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
-use llama_cpp_2::{send_logs_to_tracing, LogOptions};
+use llama_cpp_2::token::LlamaToken;
+use llama_cpp_2::{LogOptions, send_logs_to_tracing};
+use parking_lot::Mutex;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
-use parking_lot::Mutex;
 use std::time::Duration;
-use anyhow::{Result, Context};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LLMError {
@@ -28,7 +28,11 @@ fn vram_mib() -> Option<(u64, u64)> {
     #[cfg(feature = "cuda")]
     {
         unsafe extern "C" {
-            fn ggml_backend_cuda_get_device_memory(device: i32, free: *mut usize, total: *mut usize);
+            fn ggml_backend_cuda_get_device_memory(
+                device: i32,
+                free: *mut usize,
+                total: *mut usize,
+            );
         }
         unsafe { ggml_backend_cuda_get_device_memory(0, &mut free, &mut total) };
         if total > 0 {
@@ -75,10 +79,10 @@ pub struct LLM {
     n_ubatch: u32,
 }
 
-pub struct LLMContext<'a>{
+pub struct LLMContext<'a> {
     llm: &'a LLM,
     ctx: LlamaContext<'a>,
-    ctx_size: i32
+    ctx_size: i32,
 }
 
 impl LLM {
@@ -94,7 +98,8 @@ impl LLM {
             let mut n_gpu = 9999u32;
             let model = loop {
                 let model = match LlamaModel::load_from_file(
-                    &backend, &model_path,
+                    &backend,
+                    &model_path,
                     &LlamaModelParams::default().with_n_gpu_layers(n_gpu),
                 ) {
                     Ok(m) => m,
@@ -102,10 +107,15 @@ impl LLM {
                         // Load failed (likely GPU OOM before probe). On the first failure
                         // jump to 64 (covers most models); after that halve to converge fast.
                         let next = if n_gpu >= 9999 { 64 } else { n_gpu / 2 };
-                        eprintln!("ltengine: model load failed at {} GPU layers, retrying with {}", n_gpu, next);
+                        eprintln!(
+                            "ltengine: model load failed at {} GPU layers, retrying with {}",
+                            n_gpu, next
+                        );
                         n_gpu = next;
                         if n_gpu == 0 {
-                            return Err(anyhow::anyhow!("Unable to load model even with 0 GPU layers"));
+                            return Err(anyhow::anyhow!(
+                                "Unable to load model even with 0 GPU layers"
+                            ));
                         }
                         continue;
                     }
@@ -113,16 +123,20 @@ impl LLM {
 
                 // Probe: create a minimal context and decode one token to confirm
                 // the GPU has enough VRAM for compute scratch buffers.
-                let probe_ok = model.new_context(
-                    &backend,
-                    LlamaContextParams::default()
-                        .with_n_ctx(Some(NonZeroU32::new(8).unwrap()))
-                        .with_n_ubatch(1),
-                ).ok().and_then(|mut ctx| {
-                    let mut batch = LlamaBatch::new(8, 1);
-                    batch.add(LlamaToken(0), 0, &[0], true).ok()?;
-                    ctx.decode(&mut batch).ok()
-                }).is_some();
+                let probe_ok = model
+                    .new_context(
+                        &backend,
+                        LlamaContextParams::default()
+                            .with_n_ctx(Some(NonZeroU32::new(8).unwrap()))
+                            .with_n_ubatch(1),
+                    )
+                    .ok()
+                    .and_then(|mut ctx| {
+                        let mut batch = LlamaBatch::new(8, 1);
+                        batch.add(LlamaToken(0), 0, &[0], true).ok()?;
+                        ctx.decode(&mut batch).ok()
+                    })
+                    .is_some();
 
                 if probe_ok {
                     break model;
@@ -131,7 +145,10 @@ impl LLM {
                 let actual = model.n_layer() as u32;
                 let current = n_gpu.min(actual);
                 let next = current.saturating_sub((current / 10).max(1));
-                eprintln!("ltengine: GPU probe failed at {} layers, retrying with {}", current, next);
+                eprintln!(
+                    "ltengine: GPU probe failed at {} layers, retrying with {}",
+                    current, next
+                );
                 n_gpu = next;
                 drop(model);
 
@@ -146,9 +163,11 @@ impl LLM {
             (model, gpu_layers)
         } else {
             let model = LlamaModel::load_from_file(
-                &backend, model_path,
+                &backend,
+                model_path,
                 &LlamaModelParams::default().with_n_gpu_layers(0),
-            ).with_context(|| "Unable to load model")?;
+            )
+            .with_context(|| "Unable to load model")?;
             (model, None)
         };
 
@@ -156,39 +175,56 @@ impl LLM {
 
         match (use_gpu, gpu_layers) {
             (false, _) => eprintln!("ltengine: {} model layers, CPU only", model.n_layer()),
-            (true, None) => eprintln!("ltengine: {} model layers, all offloaded to GPU", model.n_layer()),
-            (true, Some(n)) => eprintln!("ltengine: {}/{} model layers on GPU, rest on CPU", n, model.n_layer()),
+            (true, None) => eprintln!(
+                "ltengine: {} model layers, all offloaded to GPU",
+                model.n_layer()
+            ),
+            (true, Some(n)) => eprintln!(
+                "ltengine: {}/{} model layers on GPU, rest on CPU",
+                n,
+                model.n_layer()
+            ),
         }
 
-        Ok(LLM { backend, model, prompt_lock: Mutex::new(()), n_ubatch })
+        Ok(LLM {
+            backend,
+            model,
+            prompt_lock: Mutex::new(()),
+            n_ubatch,
+        })
     }
 
-    pub fn create_context(&self, ctx_size: i32) -> Result<LLMContext<'_>>{
-        let ctx_params =
-            LlamaContextParams::default()
-                .with_n_ctx(Some(NonZeroU32::new(ctx_size as u32).unwrap()))
-                .with_n_ubatch(self.n_ubatch);
+    pub fn create_context(&self, ctx_size: i32) -> Result<LLMContext<'_>> {
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(Some(NonZeroU32::new(ctx_size as u32).unwrap()))
+            .with_n_ubatch(self.n_ubatch);
 
         // Use all threads
         // ctx_params = ctx_params.with_n_threads(threads);
         // ctx_params = ctx_params.with_n_threads_batch(threads_batch);
 
-        let ctx = self.model
+        let ctx = self
+            .model
             .new_context(&self.backend, ctx_params)
             .with_context(|| "Unable to create the llama context")?;
-        Ok(LLMContext{ llm: self, ctx, ctx_size })
+        Ok(LLMContext {
+            llm: self,
+            ctx,
+            ctx_size,
+        })
     }
 
-    pub fn run_prompt(&self, system: String, user: String) -> Result<String>{
+    pub fn run_prompt(&self, system: String, user: String) -> Result<String> {
         let messages = [
             LlamaChatMessage::new("user".to_string(), format!("{system}\n\n{user}"))
-                .context("Failed to build chat message")?
+                .context("Failed to build chat message")?,
         ];
 
         // Use the model's embedded chat template when llama.cpp can detect it.
         // Falls back to hardcoded Gemma format when detection fails (e.g. Gemma 4
         // until llama-cpp-sys picks up the upstream Gemma 4 template detection fix).
-        let llm_input = match self.model
+        let llm_input = match self
+            .model
             .chat_template(None)
             .ok()
             .and_then(|tmpl| self.model.apply_chat_template(&tmpl, &messages, true).ok())
@@ -196,12 +232,15 @@ impl LLM {
             Some(s) => s,
             None => {
                 eprintln!("ltengine: apply_chat_template failed: using hardcoded Gemma format");
-                format!("<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n<start_of_turn>model\n")
+                format!(
+                    "<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n<start_of_turn>model\n"
+                )
             }
         };
 
         // BOS is not added by apply_chat_template — str_to_token handles it.
-        let tokens_list = self.model
+        let tokens_list = self
+            .model
             .str_to_token(&llm_input, AddBos::Always)
             .with_context(|| "Failed to tokenize prompt")?;
         // for token in &tokens_list {
@@ -214,17 +253,19 @@ impl LLM {
         // as garbage starts to come out when we run inference in parallel
         // this might need to be investigated and fixed. For now we lock and process requests
         // one at a time.
-        let _lock = self.prompt_lock.try_lock_for(Duration::from_secs(120))
+        let _lock = self
+            .prompt_lock
+            .try_lock_for(Duration::from_secs(120))
             .ok_or(LLMError::Busy)?;
         let mut ctx = self.create_context(ctx_size)?;
         ctx.process(tokens_list)
     }
 }
 
-impl LLMContext<'_>{
-    pub fn process(&mut self, tokens_list: Vec<LlamaToken>) -> Result<String>{
+impl LLMContext<'_> {
+    pub fn process(&mut self, tokens_list: Vec<LlamaToken>) -> Result<String> {
         // let ctx_size: i32 = tokens_list.len() as i32 * 3;
-        
+
         // We use this object to submit token data for decoding
         let mut batch = LlamaBatch::new(self.ctx_size.try_into()?, 1);
 
@@ -235,7 +276,8 @@ impl LLMContext<'_>{
             batch.add(token, i, &[0], is_last)?;
         }
 
-        self.ctx.decode(&mut batch)
+        self.ctx
+            .decode(&mut batch)
             .with_context(|| "llama_decode() failed")?;
 
         let mut n_cur = batch.n_tokens();
@@ -252,13 +294,12 @@ impl LLMContext<'_>{
             LlamaSampler::min_p(0.05, 0),
             LlamaSampler::xtc(0.0, 0.1, 0, 42),
             LlamaSampler::temp_ext(0.0, 0.0, 1.0),
-            LlamaSampler::dist(42)
+            LlamaSampler::dist(42),
         ]);
 
         let mut output = String::new();
 
         while n_cur <= self.ctx_size {
-
             // sample the next token
             {
                 let token = sampler.sample(&self.ctx, batch.n_tokens() - 1);
@@ -269,8 +310,11 @@ impl LLMContext<'_>{
                 if self.llm.model.is_eog_token(token) {
                     break;
                 }
-                    
-                let output_string = self.llm.model.token_to_piece(token, &mut decoder, true, None)?;
+
+                let output_string =
+                    self.llm
+                        .model
+                        .token_to_piece(token, &mut decoder, true, None)?;
                 output.push_str(&output_string);
 
                 batch.clear();
@@ -279,7 +323,9 @@ impl LLMContext<'_>{
 
             n_cur += 1;
 
-            self.ctx.decode(&mut batch).with_context(|| "Failed to eval")?;
+            self.ctx
+                .decode(&mut batch)
+                .with_context(|| "Failed to eval")?;
         }
 
         // Gemma 4 thinking mode emits thinking content before the actual response in two forms:
