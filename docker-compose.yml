@@ -1,6 +1,6 @@
 services:
   ltengine:
-    image: ghcr.io/libretranslate/ltengine:main
+    image: ghcr.io/libretranslate/ltengine:latest
     container_name: ltengine
     restart: unless-stopped
     ports:
