@@ -4,7 +4,6 @@ use actix_web::{
 };
 use actix_multipart::form::{MultipartForm, text::Text as MPText};
 use actix_web_static_files::ResourceFiles;
-use std::sync::Arc;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -14,12 +13,15 @@ mod models;
 mod llm;
 mod banner;
 mod prompt;
+mod openai;
 
 use languages::{detect_lang, get_language_from_code, LANGUAGES};
 use error_response::ErrorResponse;
 use models::{MODELS, load_model};
 use banner::print_banner;
-use prompt::PromptBuilder;
+use prompt::{Prompt, PromptBuilder};
+use openai::{OpenAIBackend, OpenAIBackendError};
+use std::sync::Arc;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -56,7 +58,44 @@ struct Args {
 
     /// Enable verbose logging
     #[arg(short = 'v', long)]
-    verbose: bool
+    verbose: bool,
+
+    /// Base URL of an OpenAI-compatible chat/completions endpoint (e.g. a
+    /// llama.cpp server, "http://127.0.0.1:8080/v1"). When set, translations
+    /// are delegated to this endpoint and no local GGUF model is loaded.
+    #[arg(long, default_value = "")]
+    openai_base_url: String,
+
+    /// API key for the OpenAI-compatible endpoint
+    #[arg(long, default_value = "")]
+    openai_api_key: String,
+
+    /// Model name requested from the OpenAI-compatible endpoint
+    /// (required when --openai-base-url is set)
+    #[arg(long, default_value = "")]
+    openai_model: String,
+}
+
+/// Translation backend selected at startup: the in-process llama.cpp
+/// (upstream default) or an external OpenAI-compatible endpoint.
+/// See LibreTranslate/LTEngine#3 ("External model support").
+// large_enum_variant: constructed exactly once at startup and shared via
+// Arc, the variant size difference has no effect on anything.
+#[allow(clippy::large_enum_variant)]
+enum Backend {
+    Local(Arc<llm::LLM>),
+    Remote(OpenAIBackend),
+}
+
+impl Backend {
+    async fn translate(&self, prompt: Prompt) -> anyhow::Result<String> {
+        match self {
+            // The prompt_lock is only needed for the in-process llama.cpp
+            // backend; the remote endpoint handles concurrency itself.
+            Backend::Local(llm) => llm.run_prompt(prompt.system, prompt.user),
+            Backend::Remote(openai) => openai.translate(prompt).await,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -215,7 +254,7 @@ fn check_format(format: &str) -> Result<bool, ErrorResponse> {
 }
 
 #[post("/translate")]
-async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<Args>>, llm: actix_web::web::Data<Arc<llm::LLM>>) -> Result<HttpResponse, ErrorResponse> {
+async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<Args>>, backend: actix_web::web::Data<Arc<Backend>>) -> Result<HttpResponse, ErrorResponse> {
     let body = parse_payload(req, payload).await?;
     check_params(&body, &args, &[
         ("q", &body.q),
@@ -250,12 +289,12 @@ async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<
     })?;
     pb.set_target_language(tgt_lang.name);
 
-    let llm = llm.get_ref();
+    let backend = backend.get_ref();
     let prompt = pb.build(&q);
     
     let translated_text = if source != target {
-        llm.run_prompt(prompt.system, prompt.user).map_err(|e| {
-            let status = if e.is::<llm::LLMError>() { 503 } else { 500 };
+        backend.translate(prompt).await.map_err(|e| {
+            let status = if e.is::<llm::LLMError>() || e.is::<OpenAIBackendError>() { 503 } else { 500 };
             let msg = format!("{:#}", e);
             eprintln!("translation error: {}", msg);
             ErrorResponse { error: msg, status }
@@ -334,17 +373,36 @@ async fn main() -> std::io::Result<()> {
     let host = args.host.clone();
     let port = args.port;
 
-    let model_path = load_model(&args.model, &args.model_file).unwrap_or_else(|err| {
-        eprintln!("Failed to load model: {}", err);
-        std::process::exit(1);
-    });
-    
-    println!("Loading model: {}", model_path.display());
+    let backend: Arc<Backend> = if !args.openai_base_url.is_empty() {
+        // Fail fast: there is no sensible default model name for a remote
+        // endpoint, better to reject the process start than serve 500s later.
+        if args.openai_model.is_empty() {
+            eprintln!("--openai-base-url requires --openai-model");
+            std::process::exit(1);
+        }
+        println!(
+            "Remote backend: {} (model: {})",
+            args.openai_base_url, args.openai_model
+        );
+        Arc::new(Backend::Remote(OpenAIBackend::new(
+            &args.openai_base_url,
+            &args.openai_api_key,
+            &args.openai_model,
+        )))
+    } else {
+        let model_path = load_model(&args.model, &args.model_file).unwrap_or_else(|err| {
+            eprintln!("Failed to load model: {}", err);
+            std::process::exit(1);
+        });
 
-    let llm = Arc::new(llm::LLM::new(model_path, args.cpu, args.verbose).unwrap_or_else(|err| {
-        eprintln!("Failed to initialize LLM: {}", err);
-        std::process::exit(1);
-    }));
+        println!("Loading model: {}", model_path.display());
+
+        let llm = Arc::new(llm::LLM::new(model_path, args.cpu, args.verbose).unwrap_or_else(|err| {
+            eprintln!("Failed to initialize LLM: {}", err);
+            std::process::exit(1);
+        }));
+        Arc::new(Backend::Local(llm))
+    };
 
     print_banner();
 
@@ -353,7 +411,7 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             // .service(index)
-            .app_data(web::Data::new(llm.clone()))
+            .app_data(web::Data::new(backend.clone()))
             .app_data(web::Data::new(args.clone()))
             .service(get_languages)
             .service(get_frontend_settings)
