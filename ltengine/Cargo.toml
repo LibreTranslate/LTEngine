@@ -19,6 +19,10 @@ llama-cpp-2 = { version = "0.1.155" }
 encoding_rs = "0.8.35"
 actix-multipart = "0.7.2"
 whatlang = "0.16.4"
+# External OpenAI-compatible translation backend (LibreTranslate/LTEngine#3).
+# rustls TLS: no system OpenSSL dependency, matches the hf-hub default stack.
+async-openai = { version = "0.43", default-features = false, features = ["rustls", "chat-completion"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 
 [features]
 cuda = ["llama-cpp-2/cuda"]
